@@ -1,0 +1,17 @@
+FROM tiangolo/uvicorn-gunicorn-fastapi:python3.11-slim-2026-02-02
+
+WORKDIR /external-api
+
+COPY ./requirements.txt /external-api/requirements.txt
+
+RUN pip install --no-cache-dir --upgrade -r /external-api/requirements.txt
+
+COPY ./app     /external-api/app
+COPY ./static  /external-api/static
+
+CMD [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7070" ]
+
+# uvicorn app.main:app --port 7070 --reload
+# docker build -t external-api .
+# docker run --name koweg-external-api -p 7070:7070 external-api
+

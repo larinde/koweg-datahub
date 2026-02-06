@@ -1,0 +1,111 @@
+## https://hub.docker.com/_/microsoft-azure-storage-azurite
+## docker pull mcr.microsoft.com/azure-storage/azurite
+##
+## docker compose --env-file ./config/.env.local up
+#
+# Running services in test mode
+# hypercorn ./services/external-api/app/main:app --port 7071 --reload  
+# or 
+# uvicorn ./services/external-api/app/app.main:app --port 7071 --reload
+
+
+version: '3.7'
+
+services:
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: koweg-azurite
+    command: "azurite --loose --blobHost 0.0.0.0 --blobPort 10000 --queueHost 0.0.0.0 --queuePort 10001 --location /data/azurite --debug /data/azurite/debug.log"
+    env_file:
+      - ./config/.env.local
+    ports:
+      - 10000:10000
+      - 10001:10001
+      - 10002:10002
+    volumes:
+      - ./datastore/azurite:/data/azurite
+    # networks:
+    #   - koweg-network
+    
+  postgres:
+    container_name: koweg-postgres
+    image: postgres:alpine3.23
+    restart: always
+    environment:
+      - POSTGRES_USER=marketshub
+      - POSTGRES_PASSWORD=marketshub
+      - POSTGRES_DB=markets_store
+      - PGPASSWORD=postgres
+    labels:
+      - "org.springframework.boot.service-connection=postgres"
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - '5432:5432'
+    healthcheck:
+      #test: "pg_isready -U marketshub -d markets_store"
+      #test: ["CMD-SHELL", "sh -c 'pg_isready -U marketshub -d markets_store'"]
+      test: ["CMD-SHELL", "psql -U marketshub -d markets_store -c 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 20s
+      retries: 5
+    
+
+# --------------  public and internal API services  --------------
+
+  external-api:
+    container_name: koweg-external-api
+    restart: "always"
+    build: services/external-api
+    image: koweg-external-api
+    depends_on:
+      - azurite
+    links:
+      - azurite
+      - internal-api
+    env_file:
+      - ./config/.env.local
+    environment:
+      KOWEG_AZURE_STORAGE_ACCOUNT_KEY: ${KOWEG_AZURE_STORAGE_ACCOUNT_KEY}
+      MOCK_DATALAKE_CONNECTION_STRING: ${MOCK_DATALAKE_CONNECTION_STRING}
+      KOWEG_DATALAKE_CONNECTION_STRING: ${KOWEG_DATALAKE_CONNECTION_STRING}
+      KOWEG_DATALAKE_STAGED_DATA_CONTAINER: ${KOWEG_DATALAKE_STAGED_DATA_CONTAINER}
+      KOWEG_DATALAKE_VALIDATED_DATA_CONTAINER: ${KOWEG_DATALAKE_VALIDATED_DATA_CONTAINER}
+      KOWEG_AZURITE_HOST_IP: 'azurite'
+      KOWEG_INTERNAL_API_IP: 'internal-api:7071'
+    ports:
+      - 7070:7070
+    # networks:
+    #   - koweg-network
+
+  internal-api:
+    container_name: koweg-internal-api
+    restart: "always"
+    build: services/internal-api
+    image: koweg-internal-api
+    depends_on:
+      - azurite
+    links:
+      - azurite
+    env_file:
+      - ./config/.env.local
+    environment:
+      KOWEG_AZURE_STORAGE_ACCOUNT_KEY: ${KOWEG_AZURE_STORAGE_ACCOUNT_KEY}
+      MOCK_DATALAKE_CONNECTION_STRING: ${MOCK_DATALAKE_CONNECTION_STRING}
+      KOWEG_DATALAKE_CONNECTION_STRING: ${KOWEG_DATALAKE_CONNECTION_STRING}
+      KOWEG_DATALAKE_STAGED_DATA_CONTAINER: ${KOWEG_DATALAKE_STAGED_DATA_CONTAINER}
+      KOWEG_DATALAKE_VALIDATED_DATA_CONTAINER: ${KOWEG_DATALAKE_VALIDATED_DATA_CONTAINER}
+      AZURITE_HOST_IP: azurite
+    volumes:
+      - ./datastore/test-data:/internal-api/test-data
+    ports:
+      - 7071:7071
+    # networks:
+    #   - koweg-network
+
+# networks:
+#   koweg-network:
+#     driver: bridge
